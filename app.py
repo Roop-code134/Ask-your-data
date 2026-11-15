@@ -6,25 +6,32 @@ import streamlit as st
 import altair as alt
 from groq import Groq
 
-st.set_page_config(page_title="Ask Your Data", page_icon="📊", layout="wide")
+FONT = "Poppins"  # change only this line to try another font, e.g. "Inter", "DM Sans", "Lora"
 
-st.markdown(
-    """
+st.set_page_config(page_title="Ask Your Data", layout="wide", initial_sidebar_state="collapsed")
+
+CSS = """
 <style>
-.block-container {padding-top: 2rem; max-width: 1150px;}
-h1 {font-weight: 800; letter-spacing: -0.5px; color: #23001E;}
+@import url('https://fonts.googleapis.com/css2?family=__FONT_URL__:wght@400;600;700&display=swap');
 
-/* Gold sidebar */
-section[data-testid="stSidebar"] {background: #FFBA49;}
-section[data-testid="stSidebar"] * {color: #23001E;}
-section[data-testid="stSidebar"] [data-testid="stCaptionContainer"] {opacity: 1;}
+.stApp, .stApp p, .stApp label, .stApp li, .stApp input, .stApp textarea,
+.stApp button, .stApp h1, .stApp h2, .stApp h3, .stApp h4 {
+    font-family: '__FONT__', sans-serif;
+}
 
-/* Colored stat cards */
+.block-container {padding-top: 1.5rem; max-width: 1150px;}
+
+.hero {
+    background: linear-gradient(135deg, #FFBA49, #FFC970);
+    border-radius: 18px; padding: 26px 30px; margin-bottom: 18px;
+}
+.hero h1 {margin: 0; font-size: 2.2rem; font-weight: 700; letter-spacing: -0.5px; color: #23001E;}
+.hero p {margin: 6px 0 0; color: #48483A; font-size: 1rem;}
+
 .kpi {border-radius: 14px; padding: 16px 20px; color: #FFFFFF;}
 .kpi-label {font-size: 0.85rem; font-weight: 600; opacity: 0.95;}
 .kpi-value {font-size: 2rem; font-weight: 700; line-height: 1.3;}
 
-/* White content card behind each tab */
 .stTabs [data-baseweb="tab-panel"] {
     background: #FFFFFF;
     border-radius: 14px;
@@ -37,22 +44,24 @@ section[data-testid="stSidebar"] [data-testid="stCaptionContainer"] {opacity: 1;
     font-weight: 600;
 }
 </style>
-""",
+"""
+st.markdown(
+    CSS.replace("__FONT_URL__", FONT.replace(" ", "+")).replace("__FONT__", FONT),
     unsafe_allow_html=True,
 )
 
-# ---------- Sidebar ----------
-with st.sidebar:
-    st.header("📁 Your data")
-    uploaded = st.file_uploader("Upload a CSV", type="csv")
-    st.caption("Ask questions in plain English. The app writes SQL, checks it is read-only, and runs it.")
+# ---------- Header and upload ----------
+st.markdown(
+    '<div class="hero"><h1>Ask Your Data</h1>'
+    "<p>Upload a CSV, then ask questions in plain English.</p></div>",
+    unsafe_allow_html=True,
+)
 
-# ---------- Header ----------
-st.title("📊 Ask Your Data")
-st.caption("Upload a CSV, then ask questions in plain English.")
+uploaded = st.file_uploader("Upload a CSV", type="csv")
+st.caption("The app writes SQL for your question, checks that it is read-only, and runs it.")
 
 if uploaded is None:
-    st.info("👈 Upload a CSV file in the sidebar to get started.")
+    st.info("Upload a CSV file above to get started.")
     st.stop()
 
 # ---------- Load and clean data ----------
@@ -125,7 +134,6 @@ def draw_chart(result):
     ]
 
     if any(w in cat.lower() for w in ("month", "date", "year")):
-        # Time data: plum line with gold dots
         chart = (
             alt.Chart(data)
             .mark_line(color="#23001E", strokeWidth=3,
@@ -138,7 +146,6 @@ def draw_chart(result):
             .properties(height=320)
         )
     else:
-        # Categories: horizontal bars, one palette color each, in table order
         chart = (
             alt.Chart(data)
             .mark_bar(cornerRadiusEnd=4)
@@ -151,7 +158,7 @@ def draw_chart(result):
             .properties(height=max(200, 34 * len(data)))
         )
 
-    st.altair_chart(chart, use_container_width=True)
+    st.altair_chart(chart.configure(font=FONT), use_container_width=True)
 
 
 # ---------- Stat cards ----------
@@ -182,7 +189,7 @@ with k4:
     kpi("Missing cells", f"{int(df.isna().sum().sum()):,}", "#A4A9AD")
 
 st.write("")
-tab_ask, tab_summary, tab_data = st.tabs(["💬 Ask", "📝 Summary", "🗂️ Data"])
+tab_ask, tab_summary, tab_data = st.tabs(["Ask", "Summary", "Data"])
 
 # ---------- Tab: Ask ----------
 with tab_ask:
@@ -233,7 +240,7 @@ Question: {question}"""
                 draw_chart(result)
 
             st.download_button(
-                "⬇️ Download result as CSV",
+                "Download result as CSV",
                 result.to_csv(index=False).encode("utf-8"),
                 file_name="result.csv",
                 mime="text/csv",
