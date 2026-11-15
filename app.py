@@ -96,10 +96,18 @@ button[kind="primary"]:hover, [data-testid="stBaseButton-primary"]:hover {
 
 .stTextInput input {border-radius: 10px;}
 
-/* Column pills */
-.pill {display: inline-block; background: #E6F4EA; color: #0B6E4F; border-radius: 999px;
-       padding: 3px 11px; margin: 0 6px 6px 0; font-size: 0.8rem; font-weight: 600;}
-.pill.num {background: #F7ECD3; color: #6B4E12;}
+/* Dataset panel */
+.side-h {font-size: 0.95rem; font-weight: 700; color: #073B3A; margin: 2px 0 8px;}
+.col-list {max-height: 230px; overflow-y: auto; border: 1px solid #E3EEE6; border-radius: 12px;}
+.col-row {display: flex; justify-content: space-between; align-items: center; gap: 12px;
+          padding: 8px 12px; border-bottom: 1px solid #EEF4EF; font-size: 0.88rem;}
+.col-row:last-child {border-bottom: none;}
+.col-name {font-weight: 600; color: #073B3A; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;}
+.col-type {flex-shrink: 0; font-size: 0.72rem; font-weight: 600; padding: 1px 9px; border-radius: 999px;
+           background: #E6F4EA; color: #0B6E4F;}
+.col-type.number {background: #F7ECD3; color: #6B4E12;}
+.st-key-summary {background: #F4F9F5; border-radius: 12px; padding: 12px 16px; margin-top: 10px;}
+.st-key-summary p, .st-key-summary li {font-size: 0.9rem;}
 
 .empty {background: #FFFFFF; border: 2px dashed #DDB771; border-radius: 18px;
         padding: 28px 30px; color: #073B3A;}
@@ -134,23 +142,42 @@ with st.container(key="hero"):
     with h_right:
         uploaded = st.file_uploader("Upload a CSV", type="csv", label_visibility="collapsed")
 
-if uploaded is None:
+# ---------- Pick the data source: upload first, then the sample file ----------
+SAMPLE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sales.csv")
+has_sample = os.path.exists(SAMPLE_PATH)
+
+
+def start_sample():
+    st.session_state["use_sample"] = True
+
+
+if uploaded is not None:
+    source, file_key = uploaded, (uploaded.name, uploaded.size)
+    st.session_state["use_sample"] = False
+elif st.session_state.get("use_sample") and has_sample:
+    source, file_key = SAMPLE_PATH, ("sample", os.path.getsize(SAMPLE_PATH))
+    st.caption("Showing the sample sales data. Upload your own CSV above to switch.")
+else:
     st.markdown(
         '<div class="empty"><b>Drop a CSV into the box above to start.</b><br>'
-        "You'll get a quick overview of your data and can ask questions about it right away.</div>",
+        "You'll get a quick overview of your data and can ask questions about it right away."
+        + ("<br>No file handy? Try the sample sales data instead." if has_sample else "")
+        + "</div>",
         unsafe_allow_html=True,
     )
+    if has_sample:
+        st.write("")
+        st.button("Try the sample sales data", type="primary", on_click=start_sample)
     st.stop()
 
-# Reset answers when a different file is uploaded
-file_key = (uploaded.name, uploaded.size)
+# Reset answers when the data changes
 if st.session_state.get("file_key") != file_key:
     st.session_state["file_key"] = file_key
     for k in ("last", "summary", "q", "pending"):
         st.session_state.pop(k, None)
 
 # ---------- Load and clean data ----------
-df = pd.read_csv(uploaded)
+df = pd.read_csv(source)
 df.columns = [c.strip().replace(" ", "_") for c in df.columns]
 
 for col in df.columns:
@@ -287,11 +314,21 @@ cat_cols = [
     if c not in num_cols and "date" not in c.lower() and 2 <= df[c].nunique() <= 50
 ]
 
+def is_id_like(c):
+    name = c.lower()
+    pattern = r"(^|_)(id|code|zip|postal|index|no|number)($|_)"
+    return bool(re.search(pattern, name)) or df[c].nunique() == len(df)
+
+
+PREFERRED = ("sales", "revenue", "amount", "profit", "total", "price", "cost", "quantity")
+measure_cols = [c for c in num_cols if not is_id_like(c)]
+measure_cols.sort(key=lambda c: 0 if any(p in c.lower() for p in PREFERRED) else 1)
+
 suggestions = []
-if cat_cols and num_cols:
-    suggestions.append(f"Top 5 {cat_cols[0]} by total {num_cols[0]}")
-if date_cols and num_cols:
-    suggestions.append(f"Monthly total {num_cols[0]}")
+if cat_cols and measure_cols:
+    suggestions.append(f"Top 5 {cat_cols[0]} by total {measure_cols[0]}")
+if date_cols and measure_cols:
+    suggestions.append(f"Monthly total {measure_cols[0]}")
 suggestions.append("How many rows are there?")
 suggestions = suggestions[:3]
 
@@ -346,6 +383,7 @@ Sample rows:
 Notes:
 - Date columns are stored as text in YYYY-MM-DD format. Use strftime('%Y-%m', column) for months.
 - If a column name has spaces or symbols, wrap it in double quotes. Copy column names exactly as in the schema.
+- Never sum or average ID, code or postal-code columns. For totals, use measure columns such as sales, profit or quantity.
 - Return ONLY one SELECT query. No explanation, no markdown fences.
 
 Question: {question}"""
@@ -382,14 +420,24 @@ with col_side:
     with st.container(border=True, key="side"):
         st.markdown("### Your dataset")
 
-        pills = "".join(
-            f'<span class="pill{" num" if c in num_cols else ""}">{html.escape(c)}</span>'
+        st.markdown('<div class="side-h">Columns</div>', unsafe_allow_html=True)
+
+        def col_type(c):
+            if c in num_cols:
+                return "number"
+            if "date" in c.lower():
+                return "date"
+            return "text"
+
+        rows = "".join(
+            f'<div class="col-row"><span class="col-name">{html.escape(c)}</span>'
+            f'<span class="col-type {col_type(c)}">{col_type(c)}</span></div>'
             for c in df.columns
         )
-        st.markdown(pills, unsafe_allow_html=True)
-        st.caption("Green: text and dates. Gold: numbers.")
+        st.markdown(f'<div class="col-list">{rows}</div>', unsafe_allow_html=True)
 
-        st.markdown("#### Summary")
+        st.write("")
+        st.markdown('<div class="side-h">Summary</div>', unsafe_allow_html=True)
         if wide(st.button, "Generate summary", type="primary"):
             with st.spinner("Summarizing..."):
                 stats = df.describe(include="all").to_string()
@@ -399,7 +447,9 @@ with col_side:
                     max_tokens=1500,
                 )
         if "summary" in st.session_state:
-            st.markdown(st.session_state["summary"].replace("$", "\\$"))
+            with st.container(key="summary"):
+                st.markdown(st.session_state["summary"].replace("$", "\\$"))
 
-        with st.expander("Preview first 100 rows"):
-            wide(st.dataframe, df.head(100))
+st.write("")
+with st.expander("Preview data (first 100 rows)"):
+    wide(st.dataframe, df.head(100))
