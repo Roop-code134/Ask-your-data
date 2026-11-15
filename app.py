@@ -1,48 +1,109 @@
+import html
 import os
 import re
 import sqlite3
+
+import altair as alt
 import pandas as pd
 import streamlit as st
-import altair as alt
 from groq import Groq
 
 FONT = "Poppins"  # change only this line to try another font, e.g. "Inter", "DM Sans", "Lora"
+
+# Palette (from Coolors)
+TEAL = "#073B3A"      # Dark Teal
+EMERALD = "#0B6E4F"   # Dark Emerald
+JUNGLE = "#08A045"    # Medium Jungle
+MOSS = "#6BBF59"      # Moss Green
+FAWN = "#DDB771"      # Soft Fawn
 
 st.set_page_config(page_title="Ask Your Data", layout="wide", initial_sidebar_state="collapsed")
 
 CSS = """
 <style>
-@import url('https://fonts.googleapis.com/css2?family=__FONT_URL__:wght@400;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=__FONT_URL__:wght@400;500;600;700&display=swap');
 
 .stApp, .stApp p, .stApp label, .stApp li, .stApp input, .stApp textarea,
 .stApp button, .stApp h1, .stApp h2, .stApp h3, .stApp h4 {
     font-family: '__FONT__', sans-serif;
 }
+.stApp {background: #F2F7F3;}
+.stApp h2, .stApp h3, .stApp h4 {color: #073B3A; letter-spacing: -0.2px;}
+.block-container {padding-top: 1.25rem; max-width: 1200px;}
 
-.block-container {padding-top: 1.5rem; max-width: 1150px;}
+/* Hide Streamlit chrome */
+#MainMenu, footer {visibility: hidden;}
+header[data-testid="stHeader"] {background: transparent;}
 
-.hero {
-    background: linear-gradient(135deg, #FFBA49, #FFC970);
-    border-radius: 18px; padding: 26px 30px; margin-bottom: 18px;
+/* ---------- Hero band (title left, uploader right) ---------- */
+.st-key-hero {
+    background:
+        radial-gradient(circle at 94% 6%, rgba(221,183,113,0.40), transparent 36%),
+        linear-gradient(135deg, #073B3A 0%, #0B6E4F 100%);
+    border-radius: 22px;
+    padding: 30px 34px;
+    margin-bottom: 18px;
 }
-.hero h1 {margin: 0; font-size: 2.2rem; font-weight: 700; letter-spacing: -0.5px; color: #23001E;}
-.hero p {margin: 6px 0 0; color: #48483A; font-size: 1rem;}
+.hero-title {font-size: 2.4rem; font-weight: 700; letter-spacing: -0.6px; line-height: 1.15; color: #FFFFFF;}
+.hero-sub {margin-top: 8px; font-size: 1.05rem; color: #D5EBDB;}
+.hero-note {margin-top: 16px; padding-left: 12px; border-left: 3px solid #DDB771;
+            font-size: 0.85rem; color: #BFDCC9;}
 
-.kpi {border-radius: 14px; padding: 16px 20px; color: #FFFFFF;}
-.kpi-label {font-size: 0.85rem; font-weight: 600; opacity: 0.95;}
-.kpi-value {font-size: 2rem; font-weight: 700; line-height: 1.3;}
-
-.stTabs [data-baseweb="tab-panel"] {
-    background: #FFFFFF;
+.st-key-hero [data-testid="stFileUploaderDropzone"] {
+    background: rgba(255,255,255,0.08);
+    border: 2px dashed #DDB771;
     border-radius: 14px;
-    padding: 20px 24px;
-    margin-top: 12px;
+}
+.st-key-hero [data-testid="stFileUploader"] * {color: #EAF4EC;}
+.st-key-hero [data-testid="stFileUploaderDropzone"] button {
+    background: #DDB771; color: #073B3A; border: none; border-radius: 10px; font-weight: 600;
 }
 
-.stButton > button, .stFormSubmitButton > button, .stDownloadButton > button {
-    border-radius: 10px;
-    font-weight: 600;
+/* ---------- Stat strip ---------- */
+.kpi {
+    background: #FFFFFF; border: 1px solid #DCE8DF; border-left: 6px solid var(--accent);
+    border-radius: 14px; padding: 14px 18px;
 }
+.kpi-label {font-size: 0.8rem; font-weight: 600; color: #4B6B66;}
+.kpi-value {font-size: 1.7rem; font-weight: 700; line-height: 1.25; color: #073B3A;}
+
+/* ---------- Workspace panels ---------- */
+.st-key-ask, .st-key-side {
+    background: #FFFFFF;
+    border: 1px solid #DCE8DF !important;
+    border-radius: 18px !important;
+    padding: 22px 24px;
+    box-shadow: 0 6px 24px rgba(7,59,58,0.07);
+}
+
+/* Buttons */
+.stButton > button, .stFormSubmitButton > button, .stDownloadButton > button {
+    border-radius: 10px; font-weight: 600;
+}
+button[kind="primary"], [data-testid="stBaseButton-primary"] {
+    background: #0B6E4F; border: 1px solid #0B6E4F; color: #FFFFFF;
+}
+button[kind="primary"]:hover, [data-testid="stBaseButton-primary"]:hover {
+    background: #073B3A; border-color: #073B3A; color: #FFFFFF;
+}
+
+/* Suggestion pills */
+.st-key-chips button {
+    border-radius: 999px; background: #FBF3E1; border: 1px solid #DDB771;
+    color: #073B3A; font-size: 0.85rem; font-weight: 500; padding: 0.25rem 0.9rem;
+}
+.st-key-chips button:hover {background: #DDB771; border-color: #DDB771; color: #073B3A;}
+
+.stTextInput input {border-radius: 10px;}
+
+/* Column pills */
+.pill {display: inline-block; background: #E6F4EA; color: #0B6E4F; border-radius: 999px;
+       padding: 3px 11px; margin: 0 6px 6px 0; font-size: 0.8rem; font-weight: 600;}
+.pill.num {background: #F7ECD3; color: #6B4E12;}
+
+.empty {background: #FFFFFF; border: 2px dashed #DDB771; border-radius: 18px;
+        padding: 28px 30px; color: #073B3A;}
+.empty b {font-size: 1.1rem;}
 </style>
 """
 st.markdown(
@@ -50,19 +111,43 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# ---------- Header and upload ----------
-st.markdown(
-    '<div class="hero"><h1>Ask Your Data</h1>'
-    "<p>Upload a CSV, then ask questions in plain English.</p></div>",
-    unsafe_allow_html=True,
-)
 
-uploaded = st.file_uploader("Upload a CSV", type="csv")
-st.caption("The app writes SQL for your question, checks that it is read-only, and runs it.")
+def wide(fn, *args, **kwargs):
+    """Stretch a widget to full width on both old and new Streamlit versions."""
+    try:
+        return fn(*args, width="stretch", **kwargs)
+    except TypeError:
+        return fn(*args, use_container_width=True, **kwargs)
+
+
+# ---------- Hero: title on the left, uploader on the right ----------
+with st.container(key="hero"):
+    h_left, h_right = st.columns([1.25, 1], vertical_alignment="center")
+    with h_left:
+        st.markdown(
+            '<div class="hero-title">Ask Your Data</div>'
+            '<div class="hero-sub">Upload a CSV, then ask questions in plain English.</div>'
+            '<div class="hero-note">The app writes SQL for your question, checks that it is '
+            "read-only, and runs it.</div>",
+            unsafe_allow_html=True,
+        )
+    with h_right:
+        uploaded = st.file_uploader("Upload a CSV", type="csv", label_visibility="collapsed")
 
 if uploaded is None:
-    st.info("Upload a CSV file above to get started.")
+    st.markdown(
+        '<div class="empty"><b>Drop a CSV into the box above to start.</b><br>'
+        "You'll get a quick overview of your data and can ask questions about it right away.</div>",
+        unsafe_allow_html=True,
+    )
     st.stop()
+
+# Reset answers when a different file is uploaded
+file_key = (uploaded.name, uploaded.size)
+if st.session_state.get("file_key") != file_key:
+    st.session_state["file_key"] = file_key
+    for k in ("last", "summary", "q", "pending"):
+        st.session_state.pop(k, None)
 
 # ---------- Load and clean data ----------
 df = pd.read_csv(uploaded)
@@ -122,9 +207,6 @@ def validate_sql(sql: str) -> str:
 
 
 # ---------- Charts ----------
-PALETTE = ["#23001E", "#A4A9AD", "#FFBA49", "#20A39E", "#EF5B5B"]
-
-
 def draw_chart(result):
     cat, val = result.columns[0], result.columns[1]
     data = pd.DataFrame({"label": result[cat].astype(str), "value": result[val]})
@@ -134,37 +216,45 @@ def draw_chart(result):
     ]
 
     if any(w in cat.lower() for w in ("month", "date", "year")):
-        chart = (
-            alt.Chart(data)
-            .mark_line(color="#23001E", strokeWidth=3,
-                       point=alt.OverlayMarkDef(color="#FFBA49", size=80))
-            .encode(
-                x=alt.X("label:O", sort=None, title=None, axis=alt.Axis(labelAngle=-45)),
-                y=alt.Y("value:Q", title=None),
-                tooltip=tips,
-            )
-            .properties(height=320)
+        base = alt.Chart(data).encode(
+            x=alt.X("label:O", sort=None, title=None, axis=alt.Axis(labelAngle=-45)),
+            y=alt.Y("value:Q", title=None),
+            tooltip=tips,
         )
+        area = base.mark_area(color=MOSS, opacity=0.22, line=False)
+        line = base.mark_line(
+            color=EMERALD, strokeWidth=3,
+            point=alt.OverlayMarkDef(color=FAWN, size=90),
+        )
+        chart = (area + line).properties(height=320)
     else:
+        top_label = data.loc[data["value"].idxmax(), "label"]
         chart = (
             alt.Chart(data)
-            .mark_bar(cornerRadiusEnd=4)
+            .mark_bar(cornerRadiusEnd=5)
             .encode(
                 y=alt.Y("label:N", sort=None, title=None, axis=alt.Axis(labelLimit=260)),
                 x=alt.X("value:Q", title=None),
-                color=alt.Color("label:N", scale=alt.Scale(range=PALETTE), legend=None),
+                color=alt.condition(
+                    alt.datum.label == top_label, alt.value(JUNGLE), alt.value(MOSS)
+                ),
                 tooltip=tips,
             )
             .properties(height=max(200, 34 * len(data)))
         )
 
-    st.altair_chart(chart.configure(font=FONT), use_container_width=True)
+    chart = (
+        chart.configure(font=FONT)
+        .configure_view(strokeWidth=0)
+        .configure_axis(gridColor="#E3EEE6", labelColor=TEAL, domain=False, tickColor="#E3EEE6")
+    )
+    wide(st.altair_chart, chart)
 
 
-# ---------- Stat cards ----------
-def kpi(label, value, color):
+# ---------- Stat strip ----------
+def kpi(label, value, accent):
     st.markdown(
-        f'<div class="kpi" style="background:{color}">'
+        f'<div class="kpi" style="--accent:{accent}">'
         f'<div class="kpi-label">{label}</div>'
         f'<div class="kpi-value">{value}</div></div>',
         unsafe_allow_html=True,
@@ -180,30 +270,72 @@ else:
 
 k1, k2, k3, k4 = st.columns(4)
 with k1:
-    kpi("Rows", f"{len(df):,}", "#20A39E")
+    kpi("Rows", f"{len(df):,}", JUNGLE)
 with k2:
-    kpi("Columns", len(df.columns), "#EF5B5B")
+    kpi("Columns", len(df.columns), FAWN)
 with k3:
-    kpi(third[0], third[1], "#23001E")
+    kpi(third[0], third[1], EMERALD)
 with k4:
-    kpi("Missing cells", f"{int(df.isna().sum().sum()):,}", "#A4A9AD")
+    kpi("Missing cells", f"{int(df.isna().sum().sum()):,}", MOSS)
 
 st.write("")
-tab_ask, tab_summary, tab_data = st.tabs(["Ask", "Summary", "Data"])
 
-# ---------- Tab: Ask ----------
-with tab_ask:
-    with st.form("ask_form"):
-        question = st.text_input(
-            "Your question", placeholder="e.g. Top 5 products by total sales"
-        )
-        submitted = st.form_submit_button("Ask", type="primary")
+# ---------- Question helpers ----------
+num_cols = list(df.select_dtypes("number").columns)
+cat_cols = [
+    c for c in df.columns
+    if c not in num_cols and "date" not in c.lower() and 2 <= df[c].nunique() <= 50
+]
 
-    if submitted and question:
-        entry = {"question": question, "sql": ""}
-        with st.spinner("Thinking..."):
-            try:
-                prompt = f"""You write SQLite queries. The table is named `data`.
+suggestions = []
+if cat_cols and num_cols:
+    suggestions.append(f"Top 5 {cat_cols[0]} by total {num_cols[0]}")
+if date_cols and num_cols:
+    suggestions.append(f"Monthly total {num_cols[0]}")
+suggestions.append("How many rows are there?")
+suggestions = suggestions[:3]
+
+
+def queue_run():
+    st.session_state["pending"] = True
+
+
+def use_suggestion(text):
+    st.session_state["q"] = text
+    st.session_state["pending"] = True
+
+
+# ---------- Workspace: ask on the left, dataset on the right ----------
+col_main, col_side = st.columns([1.9, 1], gap="large")
+
+with col_main:
+    with st.container(border=True, key="ask"):
+        st.markdown("### Ask a question")
+
+        c_in, c_btn = st.columns([5, 1], vertical_alignment="bottom")
+        with c_in:
+            st.text_input(
+                "Your question",
+                key="q",
+                placeholder="e.g. Top 5 products by total sales",
+                label_visibility="collapsed",
+                on_change=queue_run,
+            )
+        with c_btn:
+            wide(st.button, "Ask", type="primary", on_click=queue_run)
+
+        with st.container(key="chips"):
+            chip_cols = st.columns(len(suggestions))
+            for i, (cc, s) in enumerate(zip(chip_cols, suggestions)):
+                with cc:
+                    wide(st.button, s, key=f"chip{i}", on_click=use_suggestion, args=(s,))
+
+        question = st.session_state.get("q", "").strip()
+        if st.session_state.pop("pending", False) and question:
+            entry = {"question": question, "sql": ""}
+            with st.spinner("Thinking..."):
+                try:
+                    prompt = f"""You write SQLite queries. The table is named `data`.
 
 Schema:
 {schema}
@@ -217,49 +349,57 @@ Notes:
 - Return ONLY one SELECT query. No explanation, no markdown fences.
 
 Question: {question}"""
-                sql = ask_llm(prompt).replace("```sql", "").replace("```", "").strip()
-                entry["sql"] = sql
-                entry["result"] = pd.read_sql(validate_sql(sql), conn)
-            except Exception as e:
-                entry["error"] = str(e)
-        st.session_state["last"] = entry
+                    sql = ask_llm(prompt).replace("```sql", "").replace("```", "").strip()
+                    entry["sql"] = sql
+                    entry["result"] = pd.read_sql(validate_sql(sql), conn)
+                except Exception as e:
+                    entry["error"] = str(e)
+            st.session_state["last"] = entry
 
-    last = st.session_state.get("last")
-    if last:
-        with st.expander("Generated SQL"):
-            st.code(last["sql"], language="sql")
+        last = st.session_state.get("last")
+        if last:
+            st.markdown(f"#### {html.escape(last['question'])}")
 
-        if "error" in last:
-            st.error(f"Couldn't run that: {last['error']}")
-        else:
-            result = last["result"]
-            st.subheader("Answer")
-            st.dataframe(result)
+            if "error" in last:
+                st.error(f"Couldn't run that: {last['error']}")
+            else:
+                result = last["result"]
+                if len(result.columns) == 2 and pd.api.types.is_numeric_dtype(result.iloc[:, 1]):
+                    draw_chart(result)
+                wide(st.dataframe, result)
+                wide(
+                    st.download_button,
+                    "Download result as CSV",
+                    result.to_csv(index=False).encode("utf-8"),
+                    file_name="result.csv",
+                    mime="text/csv",
+                )
 
-            if len(result.columns) == 2 and pd.api.types.is_numeric_dtype(result.iloc[:, 1]):
-                draw_chart(result)
+            with st.expander("Generated SQL"):
+                st.code(last["sql"], language="sql")
 
-            st.download_button(
-                "Download result as CSV",
-                result.to_csv(index=False).encode("utf-8"),
-                file_name="result.csv",
-                mime="text/csv",
-            )
+with col_side:
+    with st.container(border=True, key="side"):
+        st.markdown("### Your dataset")
 
-# ---------- Tab: Summary ----------
-with tab_summary:
-    if st.button("Generate summary", type="primary"):
-        with st.spinner("Summarizing..."):
-            stats = df.describe(include="all").to_string()
-            st.session_state["summary"] = ask_llm(
-                f"Summarize this dataset in 5 short bullet points for a business reader.\n"
-                f"Columns:\n{schema}\n\nStats:\n{stats}",
-                max_tokens=1500,
-            )
-    if "summary" in st.session_state:
-        st.markdown(st.session_state["summary"].replace("$", "\\$"))
+        pills = "".join(
+            f'<span class="pill{" num" if c in num_cols else ""}">{html.escape(c)}</span>'
+            for c in df.columns
+        )
+        st.markdown(pills, unsafe_allow_html=True)
+        st.caption("Green: text and dates. Gold: numbers.")
 
-# ---------- Tab: Data ----------
-with tab_data:
-    st.caption("First 100 rows")
-    st.dataframe(df.head(100))
+        st.markdown("#### Summary")
+        if wide(st.button, "Generate summary", type="primary"):
+            with st.spinner("Summarizing..."):
+                stats = df.describe(include="all").to_string()
+                st.session_state["summary"] = ask_llm(
+                    f"Summarize this dataset in 5 short bullet points for a business reader.\n"
+                    f"Columns:\n{schema}\n\nStats:\n{stats}",
+                    max_tokens=1500,
+                )
+        if "summary" in st.session_state:
+            st.markdown(st.session_state["summary"].replace("$", "\\$"))
+
+        with st.expander("Preview first 100 rows"):
+            wide(st.dataframe, df.head(100))
