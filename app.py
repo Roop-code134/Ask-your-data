@@ -342,37 +342,34 @@ def use_suggestion(text):
     st.session_state["pending"] = True
 
 
-# ---------- Workspace: ask on the left, dataset on the right ----------
-col_main, col_side = st.columns([1.9, 1], gap="large")
+# ---------- Question panel ----------
+with st.container(border=True, key="ask"):
+    st.markdown("### Ask a question")
 
-with col_main:
-    with st.container(border=True, key="ask"):
-        st.markdown("### Ask a question")
+    c_in, c_btn = st.columns([5, 1], vertical_alignment="bottom")
+    with c_in:
+        st.text_input(
+            "Your question",
+            key="q",
+            placeholder="e.g. Top 5 products by total sales",
+            label_visibility="collapsed",
+            on_change=queue_run,
+        )
+    with c_btn:
+        wide(st.button, "Ask", type="primary", on_click=queue_run)
 
-        c_in, c_btn = st.columns([5, 1], vertical_alignment="bottom")
-        with c_in:
-            st.text_input(
-                "Your question",
-                key="q",
-                placeholder="e.g. Top 5 products by total sales",
-                label_visibility="collapsed",
-                on_change=queue_run,
-            )
-        with c_btn:
-            wide(st.button, "Ask", type="primary", on_click=queue_run)
+    with st.container(key="chips"):
+        chip_cols = st.columns(len(suggestions))
+        for i, (cc, s) in enumerate(zip(chip_cols, suggestions)):
+            with cc:
+                wide(st.button, s, key=f"chip{i}", on_click=use_suggestion, args=(s,))
 
-        with st.container(key="chips"):
-            chip_cols = st.columns(len(suggestions))
-            for i, (cc, s) in enumerate(zip(chip_cols, suggestions)):
-                with cc:
-                    wide(st.button, s, key=f"chip{i}", on_click=use_suggestion, args=(s,))
-
-        question = st.session_state.get("q", "").strip()
-        if st.session_state.pop("pending", False) and question:
-            entry = {"question": question, "sql": ""}
-            with st.spinner("Thinking..."):
-                try:
-                    prompt = f"""You write SQLite queries. The table is named `data`.
+    question = st.session_state.get("q", "").strip()
+    if st.session_state.pop("pending", False) and question:
+        entry = {"question": question, "sql": ""}
+        with st.spinner("Thinking..."):
+            try:
+                prompt = f"""You write SQLite queries. The table is named `data`.
 
 Schema:
 {schema}
@@ -387,39 +384,43 @@ Notes:
 - Return ONLY one SELECT query. No explanation, no markdown fences.
 
 Question: {question}"""
-                    sql = ask_llm(prompt).replace("```sql", "").replace("```", "").strip()
-                    entry["sql"] = sql
-                    entry["result"] = pd.read_sql(validate_sql(sql), conn)
-                except Exception as e:
-                    entry["error"] = str(e)
-            st.session_state["last"] = entry
+                sql = ask_llm(prompt).replace("```sql", "").replace("```", "").strip()
+                entry["sql"] = sql
+                entry["result"] = pd.read_sql(validate_sql(sql), conn)
+            except Exception as e:
+                entry["error"] = str(e)
+        st.session_state["last"] = entry
 
-        last = st.session_state.get("last")
-        if last:
-            st.markdown(f"#### {html.escape(last['question'])}")
+    last = st.session_state.get("last")
+    if last:
+        st.markdown(f"#### {html.escape(last['question'])}")
 
-            if "error" in last:
-                st.error(f"Couldn't run that: {last['error']}")
-            else:
-                result = last["result"]
-                if len(result.columns) == 2 and pd.api.types.is_numeric_dtype(result.iloc[:, 1]):
-                    draw_chart(result)
-                wide(st.dataframe, result)
-                wide(
-                    st.download_button,
-                    "Download result as CSV",
-                    result.to_csv(index=False).encode("utf-8"),
-                    file_name="result.csv",
-                    mime="text/csv",
-                )
+        if "error" in last:
+            st.error(f"Couldn't run that: {last['error']}")
+        else:
+            result = last["result"]
+            if len(result.columns) == 2 and pd.api.types.is_numeric_dtype(result.iloc[:, 1]):
+                draw_chart(result)
+            wide(st.dataframe, result)
+            wide(
+                st.download_button,
+                "Download result as CSV",
+                result.to_csv(index=False).encode("utf-8"),
+                file_name="result.csv",
+                mime="text/csv",
+            )
 
-            with st.expander("Generated SQL"):
-                st.code(last["sql"], language="sql")
+        with st.expander("Generated SQL"):
+            st.code(last["sql"], language="sql")
 
-with col_side:
-    with st.container(border=True, key="side"):
-        st.markdown("### Your dataset")
+# ---------- Dataset panel, directly below the question panel ----------
+st.write("")
+with st.container(border=True, key="side"):
+    st.markdown("### Your dataset")
 
+    d_cols, d_sum = st.columns([1, 1.3], gap="large")
+
+    with d_cols:
         st.markdown('<div class="side-h">Columns</div>', unsafe_allow_html=True)
 
         def col_type(c):
@@ -436,7 +437,7 @@ with col_side:
         )
         st.markdown(f'<div class="col-list">{rows}</div>', unsafe_allow_html=True)
 
-        st.write("")
+    with d_sum:
         st.markdown('<div class="side-h">Summary</div>', unsafe_allow_html=True)
         if wide(st.button, "Generate summary", type="primary"):
             with st.spinner("Summarizing..."):
@@ -449,7 +450,9 @@ with col_side:
         if "summary" in st.session_state:
             with st.container(key="summary"):
                 st.markdown(st.session_state["summary"].replace("$", "\\$"))
+        else:
+            st.caption("Click the button for a five-point overview of this data.")
 
-st.write("")
-with st.expander("Preview data (first 100 rows)"):
-    wide(st.dataframe, df.head(100))
+    with st.expander("Preview data (first 100 rows)"):
+        wide(st.dataframe, df.head(100))
+
